@@ -1,8 +1,18 @@
 ---
-import { listMessages } from "../lib/db";
+import { listPinnedFunctionIds } from "../lib/db";
+import { CATEGORIES, COMMON_TASK_IDS, FUNCTIONS, FUNCTIONS_BY_ID } from "../lib/functions";
+import { ensureVisitorId } from "../lib/visitor";
+import FunctionCard from "../components/FunctionCard.astro";
 import "../styles.css";
 
-const messages = listMessages();
+const visitorId = ensureVisitorId(Astro.cookies);
+const pinnedIds = new Set(listPinnedFunctionIds(visitorId));
+const pinnedFunctions = FUNCTIONS.filter((fn) => pinnedIds.has(fn.id));
+const commonTasks = COMMON_TASK_IDS.map((id) => FUNCTIONS_BY_ID.get(id)).filter((fn) => fn !== undefined);
+const sections = CATEGORIES.map((category) => ({
+  category,
+  functions: FUNCTIONS.filter((fn) => fn.category === category),
+}));
 ---
 
 <!doctype html>
@@ -10,43 +20,247 @@ const messages = listMessages();
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>COMP4020 prototype</title>
+    <title>ANUHub</title>
   </head>
   <body>
-    <nav aria-label="site">
-      <a href="/">Guestbook</a>
-      <a href="/readme/">About</a>
-    </nav>
+    <header class="site-bar">
+      <nav aria-label="site">
+        <a href="/">ANUHub</a>
+        <a href="/readme/">About</a>
+      </nav>
+      <input
+        type="search"
+        id="search"
+        placeholder="Search functions…"
+        aria-label="Search functions"
+      />
+    </header>
     <main>
-      <h1>Guestbook</h1>
-      <p>
-        A minimal full-stack starter: messages live in SQLite on the machine's
-        volume (state survives a reload and a redeploy), and new messages
-        appear in every open tab over a server-sent-events stream — open this
-        page twice and sign it in one. Replace all of this with your own
-        prototype.
+      <h1>ANUHub</h1>
+      <p class="intro">
+        Student functions, organised by what you're trying to do — not by
+        which system owns them. Search to jump straight to one, or pin your
+        most-used functions so they're the first thing you see next time.
       </p>
-      <form method="post" action="/api/messages">
-        <label for="body">Leave a message</label>
-        <input id="body" name="body" required maxlength="500" />
-        <button>Sign</button>
-      </form>
-      <ul id="messages">
-        {messages.map((message) => <li>{message.body}</li>)}
-      </ul>
+
+      <section aria-label="Pinned" class="shelf">
+        <h2>Pinned</h2>
+        <div id="shelf-content" aria-live="polite">
+          {
+            pinnedFunctions.length === 0 ? (
+              <p class="empty" id="shelf-empty">
+                Nothing pinned yet — star a function below to add it here.
+              </p>
+            ) : (
+              <div class="shelf-grid" id="shelf-grid">
+                {pinnedFunctions.map((fn) => (
+                  <FunctionCard fn={fn} pinned={true} />
+                ))}
+              </div>
+            )
+          }
+        </div>
+      </section>
+
+      <section aria-label="Common tasks" class="common-tasks">
+        <h2>Common tasks</h2>
+        <div class="shelf-grid">
+          {commonTasks.map((fn) => <FunctionCard fn={fn} pinned={pinnedIds.has(fn.id)} />)}
+        </div>
+      </section>
+
+      <h2 class="catalog-heading">Full catalog</h2>
+      {
+        sections.map(({ category, functions }) => (
+          <details class="category" open>
+            <summary>
+              <h3>
+                {category} <span class="count-badge">{functions.length}</span>
+              </h3>
+            </summary>
+            <div class="row-list">
+              {functions.map((fn) => (
+                <FunctionCard fn={fn} pinned={pinnedIds.has(fn.id)} variant="row" />
+              ))}
+            </div>
+          </details>
+        ))
+      }
     </main>
+
+    <script type="application/json" id="catalog" is:inline set:html={JSON.stringify(FUNCTIONS)} />
+
     <script>
-      // The live half of the demo: subscribe to the SSE stream and prepend
-      // messages as they arrive. The form itself needs none of this — its
-      // POST + redirect re-renders the submitting tab from SQLite; this
-      // stream is how every other tab finds out.
-      const list = document.querySelector("#messages");
-      const source = new EventSource("/api/events");
-      source.addEventListener("message", (event) => {
-        const message = JSON.parse(event.data);
-        const item = document.createElement("li");
-        item.textContent = message.body;
-        list?.prepend(item);
+      // Instant, client-side search: the whole catalog is small and already
+      // rendered, so filtering is a DOM show/hide, never a network request.
+      // The pinned shelf and common-tasks strip are fixed shortcuts and are
+      // deliberately excluded from filtering.
+      const searchInput = document.querySelector<HTMLInputElement>("#search");
+      const searchableCards = document.querySelectorAll<HTMLElement>(".category .card");
+      const categoryDetails = document.querySelectorAll<HTMLDetailsElement>(".category");
+
+      // Remembers whether a student had a section open/closed before search
+      // started touching it, so clearing the query restores their own choice
+      // instead of always reopening everything.
+      for (const details of categoryDetails) {
+        details.dataset.manualOpen = details.open ? "true" : "false";
+      }
+
+      searchInput?.addEventListener("input", () => {
+        const query = searchInput.value.trim().toLowerCase();
+        for (const card of searchableCards) {
+          const haystack = card.dataset.search ?? "";
+          card.hidden = query.length > 0 && !haystack.includes(query);
+        }
+        for (const details of categoryDetails) {
+          if (query.length === 0) {
+            details.open = details.dataset.manualOpen === "true";
+            continue;
+          }
+          const hasVisibleMatch = Array.from(details.querySelectorAll<HTMLElement>(".card")).some(
+            (card) => !card.hidden,
+          );
+          if (hasVisibleMatch) details.open = true;
+        }
+      });
+
+      for (const details of categoryDetails) {
+        details.addEventListener("toggle", () => {
+          if ((searchInput?.value.trim().length ?? 0) === 0) {
+            details.dataset.manualOpen = details.open ? "true" : "false";
+          }
+        });
+      }
+
+      // Pin toggle: progressively enhance every pin form (grid and shelf
+      // alike) with an optimistic, no-reload update; fall back to the plain
+      // POST + redirect if JS never runs at all.
+      interface CatalogFunction {
+        id: string;
+        name: string;
+        description: string;
+        category: string;
+        icon: string;
+      }
+
+      const catalogEl = document.querySelector("#catalog");
+      const catalog: CatalogFunction[] = catalogEl ? JSON.parse(catalogEl.textContent ?? "[]") : [];
+      const byId = new Map(catalog.map((fn) => [fn.id, fn]));
+
+      function setButtonState(button: Element, pinned: boolean) {
+        button.setAttribute("aria-pressed", pinned ? "true" : "false");
+        button.textContent = pinned ? "★ Pinned" : "☆ Pin";
+      }
+
+      function getShelfGrid(): HTMLElement | null {
+        const existing = document.querySelector<HTMLElement>("#shelf-grid");
+        if (existing) return existing;
+        const content = document.querySelector<HTMLElement>("#shelf-content");
+        if (!content) return null;
+        content.replaceChildren();
+        const grid = document.createElement("div");
+        grid.className = "shelf-grid";
+        grid.id = "shelf-grid";
+        content.appendChild(grid);
+        return grid;
+      }
+
+      function buildShelfCard(fn: CatalogFunction): HTMLElement {
+        const article = document.createElement("article");
+        article.className = "card";
+        article.dataset.functionId = fn.id;
+        article.dataset.variant = "card";
+        article.dataset.search = `${fn.name} ${fn.description} ${fn.category}`.toLowerCase();
+
+        const icon = document.createElement("div");
+        icon.className = "card-icon";
+        icon.setAttribute("aria-hidden", "true");
+        icon.textContent = fn.icon;
+
+        const body = document.createElement("div");
+        body.className = "card-body";
+        const heading = document.createElement("h3");
+        heading.textContent = fn.name;
+        const description = document.createElement("p");
+        description.textContent = fn.description;
+        body.append(heading, description);
+
+        const form = document.createElement("form");
+        form.method = "post";
+        form.action = "/api/pins";
+        form.className = "pin-form";
+        const hidden = document.createElement("input");
+        hidden.type = "hidden";
+        hidden.name = "function_id";
+        hidden.value = fn.id;
+        const button = document.createElement("button");
+        button.type = "submit";
+        button.className = "pin-button";
+        button.dataset.functionId = fn.id;
+        setButtonState(button, true);
+        form.append(hidden, button);
+
+        article.append(icon, body, form);
+        return article;
+      }
+
+      function addToShelf(fn: CatalogFunction) {
+        const grid = getShelfGrid();
+        if (!grid || grid.querySelector(`[data-function-id="${fn.id}"]`)) return;
+        grid.prepend(buildShelfCard(fn));
+      }
+
+      function removeFromShelf(functionId: string) {
+        const grid = document.querySelector<HTMLElement>("#shelf-grid");
+        grid?.querySelector(`[data-function-id="${functionId}"]`)?.remove();
+        if (grid && grid.children.length === 0) {
+          const content = document.querySelector<HTMLElement>("#shelf-content");
+          if (content) {
+            content.replaceChildren();
+            const empty = document.createElement("p");
+            empty.className = "empty";
+            empty.id = "shelf-empty";
+            empty.textContent = "Nothing pinned yet — star a function below to add it here.";
+            content.appendChild(empty);
+          }
+        }
+      }
+
+      function applyPinState(functionId: string, pinned: boolean) {
+        for (const button of document.querySelectorAll(`.pin-button[data-function-id="${functionId}"]`)) {
+          setButtonState(button, pinned);
+        }
+        const fn = byId.get(functionId);
+        if (!fn) return;
+        if (pinned) addToShelf(fn);
+        else removeFromShelf(functionId);
+      }
+
+      document.addEventListener("submit", async (event) => {
+        const form = event.target;
+        if (!(form instanceof HTMLFormElement) || !form.classList.contains("pin-form")) return;
+        event.preventDefault();
+
+        const functionId = String(new FormData(form).get("function_id") ?? "");
+        if (!byId.has(functionId)) return;
+
+        const button = form.querySelector(".pin-button");
+        const wasPinned = button?.getAttribute("aria-pressed") === "true";
+        const nextPinned = !wasPinned;
+        applyPinState(functionId, nextPinned);
+
+        try {
+          const res = await fetch(form.action, {
+            method: "POST",
+            body: new FormData(form),
+            headers: { accept: "application/json" },
+          });
+          if (!res.ok) throw new Error(`status ${res.status}`);
+          const data: { functionId: string; pinned: boolean } = await res.json();
+          applyPinState(data.functionId, data.pinned);
+        } catch {
+          applyPinState(functionId, wasPinned);
+        }
       });
     </script>
   </body>

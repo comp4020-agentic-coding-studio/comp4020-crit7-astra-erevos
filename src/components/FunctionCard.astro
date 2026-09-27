@@ -1,0 +1,31 @@
+---
+import type { StudentFunction } from "../lib/functions";
+
+interface Props {
+  fn: StudentFunction;
+  pinned: boolean;
+  variant?: "card" | "row";
+}
+
+const { fn, pinned, variant = "card" } = Astro.props;
+const search = `${fn.name} ${fn.description} ${fn.category}`.toLowerCase();
+---
+
+<article class="card" data-function-id={fn.id} data-variant={variant} data-search={search}>
+  <div class="card-icon" aria-hidden="true">{fn.icon}</div>
+  <div class="card-body">
+    <h3>{fn.name}</h3>
+    <p>{fn.description}</p>
+  </div>
+  <form method="post" action="/api/pins" class="pin-form">
+    <input type="hidden" name="function_id" value={fn.id} />
+    <button
+      type="submit"
+      class="pin-button"
+      data-function-id={fn.id}
+      aria-pressed={pinned ? "true" : "false"}
+    >
+      {pinned ? "★ Pinned" : "☆ Pin"}
+    </button>
+  </form>
+</article>

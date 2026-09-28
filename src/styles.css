@@ -88,6 +88,16 @@ h1 {
   outline-offset: 1px;
 }
 
+.search-results {
+  margin-bottom: 2rem;
+}
+
+.result-count {
+  margin: 0 0 1rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
 .shelf,
 .common-tasks {
   border-radius: 0.75rem;

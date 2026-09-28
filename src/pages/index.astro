@@ -37,13 +37,19 @@ const sections = CATEGORIES.map((category) => ({
     </header>
     <main>
       <h1>ANUHub</h1>
-      <p class="intro">
+
+      <section id="search-results" class="search-results" aria-live="polite" hidden>
+        <p class="result-count" id="result-count"></p>
+        <div class="shelf-grid" id="result-grid"></div>
+      </section>
+
+      <p class="intro hide-on-search">
         Student functions, organised by what you're trying to do — not by
         which system owns them. Search to jump straight to one, or pin your
         most-used functions so they're the first thing you see next time.
       </p>
 
-      <section aria-label="Pinned" class="shelf">
+      <section aria-label="Pinned" class="shelf hide-on-search">
         <h2>Pinned</h2>
         <div id="shelf-content" aria-live="polite">
           {
@@ -62,17 +68,17 @@ const sections = CATEGORIES.map((category) => ({
         </div>
       </section>
 
-      <section aria-label="Common tasks" class="common-tasks">
+      <section aria-label="Common tasks" class="common-tasks hide-on-search">
         <h2>Common tasks</h2>
         <div class="shelf-grid">
           {commonTasks.map((fn) => <FunctionCard fn={fn} pinned={pinnedIds.has(fn.id)} />)}
         </div>
       </section>
 
-      <h2 class="catalog-heading">Full catalog</h2>
+      <h2 class="catalog-heading hide-on-search">Full catalog</h2>
       {
         sections.map(({ category, functions }) => (
-          <details class="category" open>
+          <details class="category hide-on-search" open>
             <summary>
               <h3>
                 {category} <span class="count-badge">{functions.length}</span>
@@ -91,50 +97,9 @@ const sections = CATEGORIES.map((category) => ({
     <script type="application/json" id="catalog" is:inline set:html={JSON.stringify(FUNCTIONS)} />
 
     <script>
-      // Instant, client-side search: the whole catalog is small and already
-      // rendered, so filtering is a DOM show/hide, never a network request.
-      // The pinned shelf and common-tasks strip are fixed shortcuts and are
-      // deliberately excluded from filtering.
-      const searchInput = document.querySelector<HTMLInputElement>("#search");
-      const searchableCards = document.querySelectorAll<HTMLElement>(".category .card");
-      const categoryDetails = document.querySelectorAll<HTMLDetailsElement>(".category");
-
-      // Remembers whether a student had a section open/closed before search
-      // started touching it, so clearing the query restores their own choice
-      // instead of always reopening everything.
-      for (const details of categoryDetails) {
-        details.dataset.manualOpen = details.open ? "true" : "false";
-      }
-
-      searchInput?.addEventListener("input", () => {
-        const query = searchInput.value.trim().toLowerCase();
-        for (const card of searchableCards) {
-          const haystack = card.dataset.search ?? "";
-          card.hidden = query.length > 0 && !haystack.includes(query);
-        }
-        for (const details of categoryDetails) {
-          if (query.length === 0) {
-            details.open = details.dataset.manualOpen === "true";
-            continue;
-          }
-          const hasVisibleMatch = Array.from(details.querySelectorAll<HTMLElement>(".card")).some(
-            (card) => !card.hidden,
-          );
-          if (hasVisibleMatch) details.open = true;
-        }
-      });
-
-      for (const details of categoryDetails) {
-        details.addEventListener("toggle", () => {
-          if ((searchInput?.value.trim().length ?? 0) === 0) {
-            details.dataset.manualOpen = details.open ? "true" : "false";
-          }
-        });
-      }
-
-      // Pin toggle: progressively enhance every pin form (grid and shelf
-      // alike) with an optimistic, no-reload update; fall back to the plain
-      // POST + redirect if JS never runs at all.
+      // Pin toggle: progressively enhance every pin form (grid, shelf, and
+      // search results alike) with an optimistic, no-reload update; fall
+      // back to the plain POST + redirect if JS never runs at all.
       interface CatalogFunction {
         id: string;
         name: string;
@@ -147,25 +112,18 @@ const sections = CATEGORIES.map((category) => ({
       const catalog: CatalogFunction[] = catalogEl ? JSON.parse(catalogEl.textContent ?? "[]") : [];
       const byId = new Map(catalog.map((fn) => [fn.id, fn]));
 
+      function isPinned(functionId: string): boolean {
+        return document.querySelector(`.pin-button[data-function-id="${functionId}"]`)?.getAttribute(
+          "aria-pressed",
+        ) === "true";
+      }
+
       function setButtonState(button: Element, pinned: boolean) {
         button.setAttribute("aria-pressed", pinned ? "true" : "false");
         button.textContent = pinned ? "★ Pinned" : "☆ Pin";
       }
 
-      function getShelfGrid(): HTMLElement | null {
-        const existing = document.querySelector<HTMLElement>("#shelf-grid");
-        if (existing) return existing;
-        const content = document.querySelector<HTMLElement>("#shelf-content");
-        if (!content) return null;
-        content.replaceChildren();
-        const grid = document.createElement("div");
-        grid.className = "shelf-grid";
-        grid.id = "shelf-grid";
-        content.appendChild(grid);
-        return grid;
-      }
-
-      function buildShelfCard(fn: CatalogFunction): HTMLElement {
+      function buildCard(fn: CatalogFunction, pinned: boolean): HTMLElement {
         const article = document.createElement("article");
         article.className = "card";
         article.dataset.functionId = fn.id;
@@ -189,25 +147,38 @@ const sections = CATEGORIES.map((category) => ({
         form.method = "post";
         form.action = "/api/pins";
         form.className = "pin-form";
-        const hidden = document.createElement("input");
-        hidden.type = "hidden";
-        hidden.name = "function_id";
-        hidden.value = fn.id;
+        const hiddenInput = document.createElement("input");
+        hiddenInput.type = "hidden";
+        hiddenInput.name = "function_id";
+        hiddenInput.value = fn.id;
         const button = document.createElement("button");
         button.type = "submit";
         button.className = "pin-button";
         button.dataset.functionId = fn.id;
-        setButtonState(button, true);
-        form.append(hidden, button);
+        setButtonState(button, pinned);
+        form.append(hiddenInput, button);
 
         article.append(icon, body, form);
         return article;
       }
 
+      function getShelfGrid(): HTMLElement | null {
+        const existing = document.querySelector<HTMLElement>("#shelf-grid");
+        if (existing) return existing;
+        const content = document.querySelector<HTMLElement>("#shelf-content");
+        if (!content) return null;
+        content.replaceChildren();
+        const grid = document.createElement("div");
+        grid.className = "shelf-grid";
+        grid.id = "shelf-grid";
+        content.appendChild(grid);
+        return grid;
+      }
+
       function addToShelf(fn: CatalogFunction) {
         const grid = getShelfGrid();
         if (!grid || grid.querySelector(`[data-function-id="${fn.id}"]`)) return;
-        grid.prepend(buildShelfCard(fn));
+        grid.prepend(buildCard(fn, true));
       }
 
       function removeFromShelf(functionId: string) {
@@ -261,6 +232,45 @@ const sections = CATEGORIES.map((category) => ({
         } catch {
           applyPinState(functionId, wasPinned);
         }
+      });
+
+      // Instant, client-side search: the whole catalog is small and already
+      // in memory, so filtering is just an array scan, never a network
+      // request. A non-empty query switches the page into a dedicated
+      // search-results mode — matches appear right under the search box
+      // with a count, and the normal homepage sections (Pinned, Common
+      // tasks, the full catalog) are hidden until the query is cleared.
+      const searchInput = document.querySelector<HTMLInputElement>("#search");
+      const resultsSection = document.querySelector<HTMLElement>("#search-results");
+      const resultCount = document.querySelector<HTMLElement>("#result-count");
+      const resultGrid = document.querySelector<HTMLElement>("#result-grid");
+      const hideOnSearch = document.querySelectorAll<HTMLElement>(".hide-on-search");
+
+      searchInput?.addEventListener("input", () => {
+        const query = searchInput.value.trim();
+        const searching = query.length > 0;
+
+        for (const el of hideOnSearch) el.hidden = searching;
+        if (resultsSection) resultsSection.hidden = !searching;
+
+        if (!searching) {
+          resultGrid?.replaceChildren();
+          if (resultCount) resultCount.textContent = "";
+          return;
+        }
+
+        const lower = query.toLowerCase();
+        const matches = catalog.filter((fn) =>
+          `${fn.name} ${fn.description} ${fn.category}`.toLowerCase().includes(lower),
+        );
+
+        if (resultCount) {
+          resultCount.textContent =
+            matches.length === 0
+              ? `No results for "${query}"`
+              : `${matches.length} result${matches.length === 1 ? "" : "s"} for "${query}"`;
+        }
+        resultGrid?.replaceChildren(...matches.map((fn) => buildCard(fn, isPinned(fn.id))));
       });
     </script>
   </body>

@@ -25,8 +25,11 @@ const sections = CATEGORIES.map((category) => ({
   <body>
     <header class="site-bar">
       <nav aria-label="site">
-        <a href="/">ANUHub</a>
-        <a href="/readme/">About</a>
+        <a href="/" class="brand">
+          <span class="brand-org">ANU Student Administration</span>
+          <span class="brand-product">ANUHub</span>
+        </a>
+        <a href="/readme/" class="about-link">About this build</a>
       </nav>
       <input
         type="search"
@@ -49,7 +52,11 @@ const sections = CATEGORIES.map((category) => ({
         most-used functions so they're the first thing you see next time.
       </p>
 
-      <section aria-label="Pinned" class="shelf hide-on-search">
+      <section
+        aria-label="Pinned"
+        id="shelf"
+        class:list={["shelf", "hide-on-search", { "shelf-empty": pinnedFunctions.length === 0 }]}
+      >
         <h2>Pinned</h2>
         <div id="shelf-content" aria-live="polite">
           {
@@ -68,8 +75,11 @@ const sections = CATEGORIES.map((category) => ({
         </div>
       </section>
 
-      <section aria-label="Common tasks" class="common-tasks hide-on-search">
-        <h2>Common tasks</h2>
+      <section aria-label="Quick access" class="common-tasks hide-on-search">
+        <h2>Quick access</h2>
+        <p class="section-note">
+          The student tasks people reach for most — each one still lives in its category below.
+        </p>
         <div class="shelf-grid">
           {commonTasks.map((fn) => <FunctionCard fn={fn} pinned={pinnedIds.has(fn.id)} />)}
         </div>
@@ -179,6 +189,7 @@ const sections = CATEGORIES.map((category) => ({
         const grid = getShelfGrid();
         if (!grid || grid.querySelector(`[data-function-id="${fn.id}"]`)) return;
         grid.prepend(buildCard(fn, true));
+        document.querySelector("#shelf")?.classList.remove("shelf-empty");
       }
 
       function removeFromShelf(functionId: string) {
@@ -194,6 +205,7 @@ const sections = CATEGORIES.map((category) => ({
             empty.textContent = "Nothing pinned yet — star a function below to add it here.";
             content.appendChild(empty);
           }
+          document.querySelector("#shelf")?.classList.add("shelf-empty");
         }
       }
 

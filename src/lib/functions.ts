@@ -78,13 +78,6 @@ export const FUNCTIONS: StudentFunction[] = [
     category: "Classes & enrolment",
     icon: "🗓️",
   },
-  {
-    id: "requests",
-    name: "Requests",
-    description: "Submit and track academic requests",
-    category: "Classes & enrolment",
-    icon: "📬",
-  },
   // Results & records
   {
     id: "academic-records",
@@ -264,6 +257,13 @@ export const FUNCTIONS: StudentFunction[] = [
     description: "Submit a WHS incident notification",
     category: "Help & other services",
     icon: "🚨",
+  },
+  {
+    id: "requests",
+    name: "Requests",
+    description: "Submit and track academic requests",
+    category: "Help & other services",
+    icon: "📬",
   },
 ];
 
